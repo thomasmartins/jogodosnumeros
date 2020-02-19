@@ -1,0 +1,171 @@
+---
+title: "Scouting de WRs para o Fantasy com R e nflscrapR"
+author: "Thomas Martins"
+date: "03/08/2019"
+output:
+  md_document:
+    variant: markdown_github
+---
+
+A temporada 2019 da NFL já vai começar, e com ela também as ligas de Fantasy. Na véspera do início da temporada regular é quando acotecem a maioria dos Drafts, então já é hora de ir pensando em quais jogadores escolher para o resto da temporada. 
+
+Bem, imagino que cada jogador de Fantasy tenha a sua maneira de fazer o _scouting_, isto é, analisar e comparar jogadores de forma a fazer as melhores escolhas no dia do Draft. Meu objetivo com este texto é introduzir uma nova, com o auxílio da programação em linguagem R (uma das mais utilizadas em ciência de dados) e de uma base de dados com jogadas da temporada passada da NFL. Aqui irei focar na posição de _wide receivers_, uma das que mais pontuam no Fantasy.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+### Programação em R e dados do nflscrapR
+
+Nas áreas de estatística e ciência de dados, a [linguagem de programação R](https://oestatistico.com.br/por-que-devemos-aprender-a-programar-em-r/) é uma das mais populares, tendo seu uso difundido tanto entre pesquisadores como também profissionais do mercado. Não é um bicho de sete cabeças, é simples de aprender, mesmo para quem não tem _background_ de computação, TI e afins. A criação de bibliotecas como o [dplyr](http://leg.ufpr.br/~walmes/cursoR/data-vis/slides/05-dplyr.pdf) e [ggplot2](https://www.curso-r.com/material/ggplot/), por exemplo, potencializaram ainda mais os poderes desta ferramenta.
+
+O [trabalho](https://arxiv.org/abs/1802.00998) de [Ron Yurko](twitter.com/stat_ron), [Max Horowitz](twitter.com/bklynmaks) e [Sam Ventura](twitter.com/stat_sam), pesquisadores da Universidade Carnegie Mellon, nos Estados Unidos, levou à criação de outra biblioteca para o R chamada [_nflscrapR_](https://github.com/maksimhorowitz/nflscrapR), que possibilita a raspagem de dados _play-by-play_ de todas as temporadas da NFL começando em 2009. Nestas bases também estão inclusos, para cada jogada, o resultado de um modelo estatístico criado pelos autores denominado [_Expected Points Added_ (EPA)](https://www.cmusportsanalytics.com/nfl-expected-points-nflscrapr-part-1-introduction-expected-points/), que não será o foco deste texto porém tenho planos de falar sobre ele no futuro. 
+
+### Scouting de WRs para o Fantasy: estatísticas úteis
+
+Gostaria de deixar claro que não sou nenhum especialista de Fantasy. Não conheço cada detalhe das regras, só sei o básico mesmo. Portanto esta foi a parte em que mais aprendi durante a elaboração deste texto. Não me lembro em detalhes as regras para o cálculo da pontuação, mas pelo que eu me lembre ela depende de jardas conquistadas, touchdowns marcados e, nas ligas PPR, recepções realizadas. Tem [alguns](https://diarionfl.com/2017/08/24/aprenda-a-jogar-fantasy-football-4/) bons [tutoriais](https://ligados32.lance.com.br/guia-de-fantasy/) em português
+
+Decidi focar na posição de WR aqui pois, junto com _running backs_, são as posições que mais pontuam no Fantasy. Só que para pontuar no jogo virtual, os jogadores também precisam ter um bom desempenho nos campos da NFL. No caso específico de WRs e RBs, a produção está muito atrelada ao _quarterback_ do time e ao sistema ofensivo como um todo.
+
+Algumas estatísticas mais comuns, como a porcentagem de passes completos, podem nos trazer informação valiosa sobre os _wide receivers_. No entanto, alguns sites especializados de Fantasy, como o [PFF](pff.com/fantasy), também notam outros fatores que podem ser indicativos do desempenho de um WR no Fantasy. Entre alguns desses estão a **profundidade média do WR nos alvos** (conhecido em inglês pela sigla aDOT, _average depth of target_), indicando se os passes recebidos pelo jogador são mais curtos ou longos (e passes longos resultam em mais pontos no Fantasy), **jardas pós-contato**, fator que independe do _quarterback_ e aumenta a produção ofensiva do WR, e a **porcentagem de alvos daquele WR entre todos os passes do time**, também um indicativo de maior número de jardas para um WR, dado uma mesma porcentagem de passes completos. 
+
+### Explorando a base
+
+Recentemente no Twitter, o analista [Ben Baldwin](twitter.com/benbbaldwin) fez um tutorial sobre como acessar e explorar as bases do nflscrapR para qualquer um que pudesse ver. O tutorial foi de grande ajuda para mim, inclusive na elaboração deste artigo. Irei deixar o [link](https://gist.github.com/guga31bb/5634562c5a2a7b1e9961ac9b6c568701) para quem mais possa se interessar
+
+Antes de começar nossa análise, vamos carregar todas as bibliotecas que iremos precisar
+
+```{r eval= FALSE}
+install.packages("tidyverse")
+install.packages("dplyr")
+install.packages("na.tools")
+install.packages("ggplot2")
+install.packages("ggridges")
+install.packages("teamcolors")
+install.packages("plotly")
+```
+
+```{r message=FALSE}
+library(tidyverse)
+library(dplyr)
+library(na.tools)
+library(ggplot2)
+library(ggridges)
+library(teamcolors)
+library(plotly)
+```
+
+É possível instalar a biblioteca do nflscrapR e usar seus comandos para raspar os dados, porém é mais fácil e rápido baixar direto do site dos autores, da seguinte forma:
+
+```{r message=FALSE, warning=FALSE}
+pbp <- read_csv(url("https://github.com/ryurko/nflscrapR-data/raw/master/play_by_play_data/regular_season/reg_pbp_2018.csv"))
+```
+
+Os dados são da temporada de 2018, porém é possível pegar de outros anos trocando o número ali no fim do código.
+
+A biblioteca dplyr irá facilitar tremendamente nosso trabalho. Ela faz parte do [tidyverse](http://www.estatisticacomr.uff.br/?page_id=741), um conjunto de bibliotecas de R para ciência de dados. Para quem, assim como eu, é acostumado a programar em Python, ela é similar à biblioteca pandas deste último, e o operador _pipe_ do R, representado por %>%, é equivalente aos métodos de classes do Python, desta forma "df %>% head" no tidyverse é equivalente a "df.head()" no pandas
+
+Vamos então usar este comando "head", também filtrando as colunas com o "select", para ver as primeiras linhas da base do nflscrapR:
+
+```{r nflscrapr head}
+pbp %>% select(posteam,defteam,time,yrdln,desc,play_type) %>% head
+```
+
+A base contém dados de todas as jogadas de todos os jogos da temporada regular de 2018. Como queremos analisar _wide receivers_ (e também _tight ends_), podemos filtrar as jogadas para ficarmos apenas com as de passe, neste primeiro momento passes completos. Fazemos o seguinte:
+
+```{r passes only}
+passes <- pbp %>% filter(play_type == "pass" & incomplete_pass == 0 & complete_pass == 1)
+
+### Usando o R base ao invés do dplyr/tidyverse ficaria da seguinte forma:
+###passes <- subset(pbp, play_type == "pass" & incomplete_pass == 0)
+
+passes %>% select(posteam,defteam,time,yrdln,desc,play_type) %>% head
+```
+
+Vale notar que excluímos da nossa análise as conversões de dois pontos após touchdowns. 
+
+A biblioteca ggplot2 nos permite fazer gráficos muito mais bonitos que os do R base. Com o ggridges, podemos fazer _ridgeline plots_, um tipo de gráfico bem útil. Vamos tentar fazer um para ver a distribuição da profundidade dos alvos nos passes completos dos recebedores do Los Angeles Rams em 2018
+
+```{r message=FALSE, warning=FALSE}
+data(teamcolors)
+
+rams_rec_count <- passes %>% filter(posteam=="LA") %>% count(receiver_player_name) %>% filter(n>5 & !is.na(receiver_player_name))
+
+ggplot(passes %>% filter(posteam=="LA" & !is.na(receiver_player_name) & receiver_player_name %in% rams_rec_count$receiver_player_name), aes(x=air_yards, y=receiver_player_name,fill=receiver_player_name,color=receiver_player_name)) + geom_density_ridges(jittered_points = TRUE, point_size=1,scale=2) + labs(x = "Profundidade dos alvos", y = "Nome do recebedor", title = "Profundidade dos alvos por jogador - LA Rams 2018", subtitle="Distâncias em relação à linha de scrimmage", caption = "Dados de @nflscrapR") + scale_x_continuous(limits = c(-10,30)) + scale_fill_cyclical(values = teamcolors %>% filter(name == "Los Angeles Rams") %>% select(primary,secondary)) + 
+scale_color_cyclical(values = teamcolors %>% filter(name == "Los Angeles Rams") %>% select(secondary,primary))
+```
+
+Constatamos que o _running back_ T. Gurley recebe a maioria de seus passes próximo à linha de scrimmage, _tight ends_ (T. Higbee e G. Everett) recebendo bastante passes curtos (assim como o WR C. Kupp, que costuma alinhar no slot) e os _wide receivers_ R.Woods, B. Cooks e J. Reynolds recebendo passes, em média, mais profundos. 
+
+Agora vamos contar a quantidade de passes completos por jogador:
+
+```{r receiver count}
+receiver_count <- passes %>% group_by(receiver_player_name,posteam) %>% count(receiver_player_name) %>% arrange(desc(n))
+
+
+### filtrando os com mais de 80 passes completos
+rec_count_80 <- receiver_count %>% filter(n>79 & !is.na(receiver_player_name))
+rec_count_80
+```
+
+Fazendo mais um gráfico daqueles, agora para estes jogadores
+
+```{r message=FALSE, warning=FALSE}
+
+teamcolors_nfl <- teamcolors %>% filter(league == "nfl") %>% mutate(teamID = c("ARI", "ATL", "BAL", "BUF", "CAR", "CHI", "CIN", "CLE", "DAL", "DEN", "DET", "GB", "HOU", "IND", "JAX", "KC", "LAC", "LA", "MIA", "MIN", "NE", "NO", "NYG", "NYJ" , "OAK", "PHI", "PIT", "SF", "SEA", "TB", "TEN", "WAS"))
+
+passes_color <- passes %>% left_join(teamcolors_nfl,by=c("posteam" = "teamID"), copy = TRUE) %>% filter(!(posteam == "NO" & receiver_player_name == "T.Hill")) ### sorry, Taysom
+
+ggplot(subset(passes_color,receiver_player_name %in% rec_count_80$receiver_player_name), aes(x=air_yards, y=receiver_player_name,fill=factor(name),color=factor(name))) + geom_density_ridges(jittered_points = TRUE, point_size=0.5) + labs(x = "Profundidade dos alvos", y = "Nome do recebedor", title = "Profundidade dos alvos por jogador", subtitle="Distâncias em relação à linha de scrimmage", caption = "Dados de @nflscrapR") + scale_x_continuous(limits = c(-10,25)) + scale_fill_teams(name="name") + scale_color_teams(name="name",which=2) + theme(legend.position = "none")
+```                                                                                                                                                           
+
+É importante visualizar o formato da distribuição, mas podemos também fazer um diagrama de dispersão com as médias, tanto para profundidade do alvo como para jardas pós-contato. Novamente utilizamos o dplyr:
+
+```{r mean depth yac}
+avg_depth <- passes %>% group_by(receiver_player_name,posteam) %>% summarize(mean_depth=mean(air_yards), mean_yac=mean(yards_after_catch), comp_passes=n()) %>% arrange(desc(comp_passes)) %>% filter(comp_passes > 29)
+
+### apenas jogadores com mais de 30 passes completos
+avg_depth
+
+avg_depth <- avg_depth %>% mutate(text = paste("Nome: ", receiver_player_name, " (", posteam,")", "\nPasses Completos: ", comp_passes, "\nProfundidade média (aDOT): ", sprintf("%0.2f",mean_depth), "\nJardas pós contato (média)", sprintf("%0.2f",mean_yac)))
+
+color_palette <- teamcolors_nfl %>% select(name,teamID,primary,secondary)
+
+avg_depth_color <- avg_depth %>% left_join(color_palette,by=c("posteam" = "teamID"), copy = TRUE)
+
+bubble <- ggplot(avg_depth_color, aes(x=mean_depth, y=mean_yac, size = comp_passes, color=factor(name), text=text)) + geom_point(alpha=0.7) + scale_color_teams(name="name") + theme(legend.position="none") + labs(x = "Profundidade média dos alvos (aDOT)", y = "Média de jardas pós contato", title = "Profundidade média (aDOT) e jardas pós-contato", subtitle="Tamanho da bolinha = nº de passes completos", caption = "Dados de @nflscrapR")
+
+ggplotly(bubble, tooltip="text")
+
+```
+
+Agora que já vimos a profundidade média e jardas pós-contato, podemos analisar a porcentagem de alvos. Para isto, pegamos todas as jogadas de passe novamente
+
+```{r passes team}
+passes_team <- subset(pbp, complete_pass == 1 | incomplete_pass == 1)
+
+target_pct <- passes_team %>% group_by(posteam,receiver_player_name) %>% summarize(targets=n()) %>% filter(!is.na(receiver_player_name) & targets>25)
+
+target_team <- passes_team %>% group_by(posteam) %>% summarize(targets=n())
+
+target_pct <- merge(x=target_pct,y=target_team,by="posteam")
+
+target_pct <- target_pct %>% mutate(target_pct = targets.x/targets.y)
+
+target_pct <- target_pct %>% rename(targets = targets.x, team_targets = targets.y) %>% arrange(desc(target_pct)) #%>% mutate(target_pct = sprintf("%0.2f", target_pct))
+
+target_pct %>% head
+
+```
+
+A coluna target_pct é a porcentagem dos passes do time em que aquele jogador foi alvo. Por exemplo, DeAndre Hopkins foi alvo de 32,2% dos passes do Houston Texans em 2018. Podemos tentar visualizar em um gráfico simples:
+
+```{r message=FALSE}
+
+target_pct_color <- target_pct %>% left_join(color_palette,by=c("posteam" = "teamID"), copy = TRUE)
+
+ggplot(subset(target_pct_color,target_pct>0.22),aes(x=reorder(receiver_player_name,target_pct),y=target_pct,fill=factor(name))) + geom_bar(stat="identity") + coord_flip() + labs(x = "Proporção de alvos", y = "Nome do recebedor", title = "Proporção de alvos por jogador", subtitle="nº de alvos do jogador / nº de alvos total do time", caption = "Dados de @nflscrapR") + scale_fill_teams(name="name") + theme(legend.position = "none") + geom_text(aes(label=sprintf("%0.2f",target_pct),color=factor(name)), size=2.5,hjust = 1.2) + scale_color_teams(name="name",which=2)
+```
+
+Bem, já deu um belo trabalho aqui. Esta foi a minha primeira vez explorando os dados do nflscrapR, e deu pra ter uma bela noção do potencial da ferramenta. Pretendo fazer mais análises no futuro, a temporada já vai começar e assim as perguntas a serem respondidas irão surgindo. 
